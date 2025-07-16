@@ -1,0 +1,12 @@
+{
+  "YOUR_GUILD_ID_1": {
+    "prefix": "!",
+    "modLogChannelId": "1234899698930811032",
+    "modLogWebhookUrl": "https://discord.com/api/webhooks/1395185514486960148/xN7V8paYHVHuRL8BUZpTcMCpLzDQ4FikiVNtQ-0ZYQfwuED4y7dEfW2deh8ZC26LsOG3",
+    "warnings": {},
+    "856388475528282133": {
+        "prefix": "!"
+    }
+}
+}
+
