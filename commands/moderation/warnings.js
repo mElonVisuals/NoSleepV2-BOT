@@ -7,18 +7,22 @@ module.exports = {
         description: 'Displays a user\'s warnings.',
         cooldown: 5,
     },
-    async execute(message, args, client, guildSettings) { // guildSettings for warning data
+    // Ensure 'pool' is the last argument here
+    async execute(message, args, client, currentGuildSettings, pool) {
         const member = message.mentions.members.first() || message.guild.members.cache.get(args[0]) || message.member;
         const user = member.user;
+        const guildId = message.guild.id;
 
         if (!member) {
             return message.reply({ content: '❌ Could not find that user.', ephemeral: true });
         }
 
-        const userWarnings = guildSettings[message.guild.id]?.warnings?.[member.id] || [];
+        // Fetch warnings from the database using pool.query
+        const result = await pool.query('SELECT * FROM warnings WHERE guild_id = $1 AND user_id = $2 ORDER BY timestamp ASC', [guildId, member.id]);
+        const userWarnings = result.rows; // This is correct for pg
 
         const warningsEmbed = new EmbedBuilder()
-            .setColor(userWarnings.length > 0 ? 0xf1c40f : 0x2ecc71) // Yellow if warnings, green if none
+            .setColor(userWarnings.length > 0 ? 0xf1c40f : 0x2ecc71)
             .setTitle(`⚠️ Warnings for ${user.tag}`)
             .setThumbnail(user.displayAvatarURL({ dynamic: true }))
             .setDescription(`**Total Warnings: \`${userWarnings.length}\`**\n\n`)
@@ -28,11 +32,10 @@ module.exports = {
         if (userWarnings.length === 0) {
             warningsEmbed.setDescription(`🎉 ${user.tag} has no warnings!`);
         } else {
-            // Map each warning to a field
             userWarnings.forEach((warn, index) => {
                 warningsEmbed.addFields({
                     name: `Warning #${index + 1} (ID: ${warn.id})`,
-                    value: `**Reason:** ${warn.reason}\n**Warned By:** <@${warn.executor}> (<t:${Math.floor(warn.timestamp / 1000)}:R>)`,
+                    value: `**Reason:** ${warn.reason}\n**Warned By:** <@${warn.executor_id}> (<t:${Math.floor(warn.timestamp / 1000)}:R>)`,
                     inline: false
                 });
             });
