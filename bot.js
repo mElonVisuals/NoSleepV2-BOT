@@ -227,9 +227,9 @@ client.on('messageCreate', async message => {
     const guildPrefix = currentGuildSettings.prefix || '!';
 
     // --- XP GAIN LOGIC (NEW) ---
-    const XP_COOLDOWN = 60 * 1000; // 60 seconds cooldown for XP gain per user
-    const XP_PER_MESSAGE_MIN = 15;
-    const XP_PER_MESSAGE_MAX = 25;
+    const XP_COOLDOWN = 280 * 1000; // 60 seconds cooldown for XP gain per user
+    const XP_PER_MESSAGE_MIN = 5;
+    const XP_PER_MESSAGE_MAX = 5;
 
     const userLevelData = await getUserLevel(message.author.id, guildId, pool);
     const lastXpGain = userLevelData.last_xp_gain;
