@@ -1,6 +1,16 @@
 {
+  "name": "nosleepv2",
+  "version": "1.0.0",
+  "description": "A Discord bot that prevents your computer from sleeping.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "author": "Your Name",
+  "license": "ISC",
   "dependencies": {
     "discord.js": "^14.21.0",
-    "dotenv": "^17.2.0"
+    "dotenv": "^17.2.0",
+    "pg": "^8.16.3"
   }
 }
