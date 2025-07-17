@@ -56,13 +56,15 @@ for (const folder of commandFolders) {
 
 // --- Rich Presence Animation Setup ---
 const activities = [
-    { name: 'your commands!', type: ActivityType.Watching },
-    { name: 'the server', type: ActivityType.Watching },
-    { name: 'NoSleepV2', type: ActivityType.Playing }, // Example of a Playing status
-    { name: 'with Postgres', type: ActivityType.Playing },
-    { name: `over ${client.guilds.cache.size} servers!`, type: ActivityType.Watching }, // Dynamic value
-    { name: `!help for commands`, type: ActivityType.Playing }
-    // Add more activities as desired!
+    { name: 'your every command! 👀', type: ActivityType.Watching },
+    { name: `over ${client.guilds.cache.size} servers 🌐`, type: ActivityType.Watching }, // Dynamic guild count
+    { name: 'the stars for you 🌟', type: ActivityType.Watching },
+    { name: 'NoSleepV2 come alive 🌙', type: ActivityType.Playing },
+    { name: 'with the PostgreSQL database 🗄️', type: ActivityType.Playing },
+    { name: 'Type !help for guidance 📚', type: ActivityType.Playing },
+    { name: 'for new updates! ✨', type: ActivityType.Listening },
+    { name: 'the whispers of the server 🤫', type: ActivityType.Listening },
+    { name: 'the server rules 📜', type: ActivityType.Competing } // Example of Competing
 ];
 
 let activityIndex = 0; // To keep track of the current activity
@@ -71,12 +73,14 @@ function updatePresence() {
     const activity = activities[activityIndex];
 
     // Handle dynamic values if needed, e.g., guild count
-    if (activity.name.includes('${client.guilds.cache.size}')) {
-        activity.name = `over ${client.guilds.cache.size} servers!`;
+    // This part is crucial if you have dynamic text in your activities array
+    let currentActivityName = activity.name;
+    if (currentActivityName.includes('${client.guilds.cache.size}')) {
+        currentActivityName = `over ${client.guilds.cache.size} servers 🌐`;
     }
 
-    client.user.setActivity(activity.name, { type: activity.type });
-    console.log(`Set presence to: ${ActivityType[activity.type]} ${activity.name}`); // Log for debugging
+    client.user.setActivity(currentActivityName, { type: activity.type });
+    console.log(`Set presence to: ${ActivityType[activity.type]} ${currentActivityName}`); // Log for debugging
 
     activityIndex = (activityIndex + 1) % activities.length; // Cycle to the next activity
 }
@@ -121,8 +125,8 @@ client.once('ready', async () => {
                     `, [
                         guildId,
                         settings.prefix || '!',
-                        settings.modLogChannelId || null,
-                        settings.modLogWebhookUrl || null
+                        settings.modLogChannelId || '1234899698930811032',
+                        settings.modLogWebhookUrl || 'https://discord.com/api/webhooks/1395185514486960148/xN7V8paYHVHuRL8BUZpTcMCpLzDQ4FikiVNtQ-0ZYQfwuED4y7dEfW2deh8ZC26LsOG3'
                     ]);
                 }
             }
