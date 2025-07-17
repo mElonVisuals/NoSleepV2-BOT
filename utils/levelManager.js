@@ -1,6 +1,3 @@
-// D:\NoSleepV2\utils\levelManager.js
-const { pool } = require('../bot'); // Assuming bot.js exports pool, or pass pool directly
-
 // Function to calculate XP needed for next level
 function getXpForLevel(level) {
     return 5 * (level ** 2) + (50 * level) + 100; // Common XP curve formula

@@ -1,6 +1,6 @@
-// D:\NoSleepV2\bot.js
+
 require('dotenv').config();
-const { Client, Collection, GatewayIntentBits, ActivityType } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, ActivityType, EmbedBuilder } = require('discord.js');
 const { getUserLevel, addXp, getXpForLevel } = require('./utils/levelManager');
 const fs = require('node:fs');
 const path = require('node:path');

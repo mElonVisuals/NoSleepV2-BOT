@@ -1,6 +1,3 @@
-// D:\NoSleepV2\utils\economyManager.js
-const { pool } = require('../bot'); // Assuming bot.js exports pool, or pass pool directly
-
 // Function to get a user's balance
 async function getUserBalance(userId, guildId, pool) {
     try {
