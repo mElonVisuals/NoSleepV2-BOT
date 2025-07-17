@@ -1,10 +1,8 @@
 // D:\NoSleepV2\commands\music\play.js
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const play = require('play-dl'); // Import play-dl
+const { joinVoiceChannel, createAudioPlayer, AudioPlayerStatus } = require('@discordjs/voice');
+const play = require('play-dl');
 const { EmbedBuilder } = require('discord.js');
-
-// Your existing queue map structure
-const queue = new Map();
+const musicManager = require('../../utils/musicManager'); // Import the music manager
 
 module.exports = {
     data: {
@@ -30,15 +28,11 @@ module.exports = {
 
         let songInfo;
         try {
-            // play-dl can handle direct YouTube links or even search queries
-            // For simplicity, let's assume direct YouTube link for now
-            // You can add search functionality later if desired
-            const result = await play.yt_info(songUrl, {
-                // You can add options here, e.g., 'quality': 'highestaudio'
-            });
-
+            // play-dl can handle various link types, but for simplicity, we focus on YouTube links provided directly
+            // For a search query, you would use play.search() instead of play.yt_info()
+            const result = await play.yt_info(songUrl); // Get detailed YouTube info
             if (!result || !result.video_details) {
-                return message.reply('Could not find video information for the provided link.');
+                return message.reply('Could not find video information for the provided link. Please ensure it\'s a valid YouTube URL.');
             }
 
             songInfo = {
@@ -52,9 +46,10 @@ module.exports = {
             return message.reply('Error fetching song information. Please ensure it\'s a valid YouTube link and try again.');
         }
 
-        let serverQueue = queue.get(message.guild.id);
+        let serverQueue = musicManager.getQueue(message.guild.id);
 
         if (!serverQueue) {
+            // Construct the queue object if it doesn't exist
             const queueContruct = {
                 textChannel: message.channel,
                 voiceChannel: voiceChannel,
@@ -65,10 +60,11 @@ module.exports = {
                 playing: true,
             };
 
-            queue.set(message.guild.id, queueContruct);
-            queueContruct.songs.push(songInfo);
+            musicManager.setQueue(message.guild.id, queueContruct); // Store the new queue in the manager
+            queueContruct.songs.push(songInfo); // Add the first song
 
             try {
+                // Create voice connection
                 const connection = joinVoiceChannel({
                     channelId: voiceChannel.id,
                     guildId: voiceChannel.guild.id,
@@ -76,37 +72,41 @@ module.exports = {
                 });
                 queueContruct.connection = connection;
 
+                // Create audio player
                 queueContruct.player = createAudioPlayer();
                 connection.subscribe(queueContruct.player); // Subscribe the connection to the player
 
-                // When the player enters the Idle state, play the next song
+                // Event listener for when a song finishes
                 queueContruct.player.on(AudioPlayerStatus.Idle, () => {
                     queueContruct.songs.shift(); // Remove the finished song
-                    this.playSong(message.guild, queueContruct.songs[0]);
+                    musicManager.playSong(message.guild, queueContruct.songs[0]); // Play the next song using the manager
                 });
 
-                // Handle player errors
+                // Error handling for the audio player
                 queueContruct.player.on('error', error => {
                     console.error(`Error in audio player for guild ${message.guild.id}:`, error);
                     queueContruct.textChannel.send(`An error occurred during playback: \`${error.message}\`. Skipping song.`);
                     queueContruct.songs.shift(); // Skip the problematic song
                     if (queueContruct.songs.length > 0) {
-                        this.playSong(message.guild, queueContruct.songs[0]);
+                        musicManager.playSong(message.guild, queueContruct.songs[0]); // Try playing the next one
                     } else {
-                        queueContruct.textChannel.send('Queue finished!');
-                        queueContruct.connection.destroy();
-                        queue.delete(message.guild.id);
+                        // If no more songs, clean up
+                        queueContruct.textChannel.send('Queue finished! Leaving voice channel.');
+                        if (queueContruct.connection) queueContruct.connection.destroy();
+                        musicManager.deleteQueue(message.guild.id);
                     }
                 });
 
-                this.playSong(message.guild, queueContruct.songs[0]);
+                // Start playing the first song
+                musicManager.playSong(message.guild, queueContruct.songs[0]);
 
             } catch (err) {
-                console.error(err);
-                queue.delete(message.guild.id);
-                return message.channel.send(err);
+                console.error('Failed to join voice channel or play:', err);
+                musicManager.deleteQueue(message.guild.id); // Clean up queue on error
+                return message.channel.send(`Failed to join the voice channel: \`${err.message}\``);
             }
         } else {
+            // If a queue already exists, just add the song
             serverQueue.songs.push(songInfo);
             const addedEmbed = new EmbedBuilder()
                 .setColor(0xFEE75C) // Yellow
@@ -121,40 +121,5 @@ module.exports = {
             return message.channel.send({ embeds: [addedEmbed] });
         }
     },
-
-    // This is a helper method, define it outside execute but within module.exports
-    async playSong(guild, song) {
-        const serverQueue = queue.get(guild.id);
-        if (!song) {
-            serverQueue.textChannel.send('Queue finished!');
-            serverQueue.connection.destroy();
-            queue.delete(guild.id);
-            return;
-        }
-
-        try {
-            // Get stream using play-dl
-            const stream = await play.stream(song.url);
-            const resource = createAudioResource(stream.stream, { inputType: stream.type });
-
-            serverQueue.player.play(resource);
-
-            const playingEmbed = new EmbedBuilder()
-                .setColor(0x57F287) // Green
-                .setTitle('▶️ Now Playing')
-                .setDescription(`**[${song.title}](${song.url})**`)
-                .addFields(
-                    { name: 'Duration', value: `${new Date(song.duration * 1000).toISOString().slice(11, 19)}`, inline: true }
-                )
-                .setThumbnail(song.thumbnail)
-                .setTimestamp();
-
-            serverQueue.textChannel.send({ embeds: [playingEmbed] });
-        } catch (error) {
-            console.error(`Error playing song ${song.title}:`, error);
-            serverQueue.textChannel.send(`Failed to play **${song.title}**: \`${error.message}\`. Skipping.`);
-            serverQueue.songs.shift(); // Skip this problematic song
-            this.playSong(guild, serverQueue.songs[0]); // Try playing the next one
-        }
-    },
+    // The playSong method is now handled by musicManager and should no longer be here
 };

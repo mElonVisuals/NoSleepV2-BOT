@@ -1,6 +1,12 @@
-// Function to calculate XP needed for next level
+/**
+ * Calculates the total XP required to reach a specific level.
+ * @param {number} level The target level.
+ * @returns {number} The total XP needed for that level.
+ */
 function getXpForLevel(level) {
-    return 5 * (level ** 2) + (50 * level) + 100; // Common XP curve formula
+    // OLD FORMULA: return 5 * (level ** 2) + (50 * level) + 100;
+    // NEW FORMULA: Significantly increased XP requirements, especially at higher levels
+    return 5 * (level ** 1) + (15 * level) + 50;
 }
 
 // Function to get a user's XP and level
