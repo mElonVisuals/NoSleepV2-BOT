@@ -1,6 +1,7 @@
 // D:\NoSleepV2\bot.js
 require('dotenv').config();
 const { Client, Collection, GatewayIntentBits, ActivityType } = require('discord.js');
+const { getUserLevel, addXp, getXpForLevel } = require('./utils/levelManager');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
@@ -99,6 +100,38 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
 
     try {
+        // ... existing CREATE TABLE statements for guild_settings and warnings ...
+
+        // NEW: Create user_economy table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_economy (
+                user_id VARCHAR(20) NOT NULL,
+                guild_id VARCHAR(20) NOT NULL,
+                balance BIGINT DEFAULT 0,
+                last_daily BIGINT DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            );
+        `);
+
+        // NEW: Create user_levels table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_levels (
+                user_id VARCHAR(20) NOT NULL,
+                guild_id VARCHAR(20) NOT NULL,
+                xp BIGINT DEFAULT 0,
+                level INT DEFAULT 0,
+                last_xp_gain BIGINT DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            );
+        `);
+        console.log('PostgreSQL tables checked/created: guild_settings, warnings, user_economy, user_levels.');
+
+    } catch (err) {
+        console.error('Error initializing database tables or migrating data:', err.stack);
+        process.exit(1); // Exit if database setup fails
+    }
+
+    try {
         // Create guild_settings table if it doesn't exist
         await pool.query(`
             CREATE TABLE IF NOT EXISTS guild_settings (
@@ -163,53 +196,80 @@ client.once('ready', async () => {
 });
 
 client.on('messageCreate', async message => {
-    // Ignore bot messages and messages outside of a guild
+    // Ignore bot messages, messages outside of a guild, and messages that are commands
     if (message.author.bot || !message.guild) return;
 
     const guildId = message.guild.id;
     let currentGuildSettings;
 
     try {
-        // Fetch guild settings from PostgreSQL
+        // ... existing database fetching/creation for guild_settings ...
         let result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
         currentGuildSettings = result.rows[0];
 
-        // If no settings found for this guild, create default ones
         if (!currentGuildSettings) {
             await pool.query(`
                 INSERT INTO guild_settings (guild_id)
                 VALUES ($1)
             `, [guildId]);
-            // Re-fetch to get the newly created default settings
             result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
             currentGuildSettings = result.rows[0];
             console.log(`Created default settings for new guild: ${message.guild.name} (${guildId})`);
         }
     } catch (dbError) {
         console.error(`Error fetching/creating guild settings for ${guildId}:`, dbError.stack);
-        // Optionally, reply to the channel that an error occurred
-        if (message.channel.type === 0) { // If it's a guild text channel
+        if (message.channel.type === 0) {
             message.reply('An error occurred while fetching server settings. Please try again later.').catch(err => console.error('Failed to reply with DB error:', err));
         }
-        return; // Stop processing this message if DB error
+        return;
     }
 
-    const guildPrefix = currentGuildSettings.prefix || '!'; // Use fetched prefix, default to '!'
+    const guildPrefix = currentGuildSettings.prefix || '!';
 
-    // Ignore messages that don't start with the guild's prefix
+    // --- XP GAIN LOGIC (NEW) ---
+    const XP_COOLDOWN = 60 * 1000; // 60 seconds cooldown for XP gain per user
+    const XP_PER_MESSAGE_MIN = 15;
+    const XP_PER_MESSAGE_MAX = 25;
+
+    const userLevelData = await getUserLevel(message.author.id, guildId, pool);
+    const lastXpGain = userLevelData.last_xp_gain;
+
+    if (Date.now() - lastXpGain > XP_COOLDOWN) {
+        const xpAmount = Math.floor(Math.random() * (XP_PER_MESSAGE_MAX - XP_PER_MESSAGE_MIN + 1)) + XP_PER_MESSAGE_MIN;
+        const { newXp, newLevel, levelUp, currentLevel } = await addXp(message.author.id, guildId, xpAmount, pool);
+
+        if (levelUp) {
+            const levelUpEmbed = new EmbedBuilder()
+                .setColor(0x7289DA) // Discord Dark Blurple for Level Up
+                .setTitle('🎉 Level Up!')
+                .setDescription(`Congratulations, ${message.author}! You've reached **Level ${newLevel}**!`)
+                .addFields(
+                    { name: 'Current XP', value: `${newXp}`, inline: true },
+                    { name: 'Next Level XP', value: `${getXpForLevel(newLevel)}`, inline: true }
+                )
+                .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+                .setTimestamp()
+                .setFooter({ text: `Keep chatting to earn more XP!`, iconURL: client.user.displayAvatarURL({ dynamic: true }) });
+
+            await message.channel.send({ content: `Well done, ${message.author}!`, embeds: [levelUpEmbed] }).catch(err => console.error('Failed to send level up message:', err));
+            // You could also add logic here to give level-up roles.
+        }
+    }
+    // --- END XP GAIN LOGIC ---
+
+    // Ignore messages that don't start with the guild's prefix (after XP logic)
     if (!message.content.startsWith(guildPrefix)) return;
 
-    // Parse command and arguments
+    // ... existing command parsing and execution logic ...
     const args = message.content.slice(guildPrefix.length).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
 
     const command = client.commands.get(commandName);
 
-    if (!command) return; // Ignore if command does not exist
+    if (!command) return;
 
-    // Cooldowns logic
+    // Cooldowns logic (existing)
     const { cooldowns } = client;
-
     if (!cooldowns.has(command.data.name)) {
         cooldowns.set(command.data.name, new Collection());
     }
@@ -224,13 +284,10 @@ client.on('messageCreate', async message => {
 
         if (now < expirationTime) {
             const timeLeft = (expirationTime - now) / 1000;
-            // Ephemeral reply for cooldowns
             return message.reply({
                 content: `Please wait \`${timeLeft.toFixed(1)}\` more second(s) before reusing the \`${command.data.name}\` command.`,
                 ephemeral: true
             }).then(msg => {
-                // Optionally delete the bot's reply if it's not ephemeral
-                // setTimeout(() => msg.delete().catch(console.error), 5000);
             }).catch(err => console.error('Failed to send cooldown reply:', err));
         }
     }
@@ -238,14 +295,12 @@ client.on('messageCreate', async message => {
     timestamps.set(message.author.id, now);
     setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
 
-    // Execute the command
+    // Execute the command (existing)
     try {
-        // Pass currentGuildSettings and the pool to the command's execute function
         await command.execute(message, args, client, currentGuildSettings, pool);
     } catch (error) {
         console.error(`Error executing command ${commandName}:`, error);
-        // Reply to the user about the error
-        if (message.channel.type === 0) { // Check if it's a guild text channel
+        if (message.channel.type === 0) {
             await message.reply({ content: 'There was an error while executing this command!', ephemeral: true }).catch(err => console.error('Failed to send error reply:', err));
         } else {
             console.warn(`Could not send error reply to DM for command ${commandName}.`);

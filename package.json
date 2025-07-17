@@ -9,8 +9,14 @@
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.18.0",
+    "axios": "^1.10.0",
+    "canvas": "^3.1.2",
     "discord.js": "^14.21.0",
     "dotenv": "^17.2.0",
-    "pg": "^8.16.3"
+    "ffmpeg-static": "^5.2.0",
+    "pg": "^8.16.3",
+    "ytdl-core": "^4.11.5"
   }
 }
