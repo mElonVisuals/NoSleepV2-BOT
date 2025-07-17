@@ -30,7 +30,7 @@ module.exports = {
         try {
             // play-dl can handle various link types, but for simplicity, we focus on YouTube links provided directly
             // For a search query, you would use play.search() instead of play.yt_info()
-            const result = await play.yt_info(songUrl); // Get detailed YouTube info
+            const result = await play.video_info(songUrl); // Get detailed YouTube info
             if (!result || !result.video_details) {
                 return message.reply('Could not find video information for the provided link. Please ensure it\'s a valid YouTube URL.');
             }
