@@ -30,12 +30,14 @@ pool.connect()
 
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,           // Required for guild-related events (e.g., fetching members, channels)
-        GatewayIntentBits.GuildMessages,    // Required for message creation events
-        GatewayIntentBits.MessageContent,   // Required to read message content (for commands)
-        GatewayIntentBits.GuildMembers,     // Required to access guild members (for user info, moderation, etc.)
-        GatewayIntentBits.GuildPresences    // Required for member status (if you need it, though not strictly for rich presence itself)
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildVoiceStates, // <<< ADD THIS LINE FOR VOICE CHANNEL DETECTION
+        GatewayIntentBits.GuildMembers,     // <<< ADD THIS LINE for better member caching (recommended)
+        // Keep any other intents your bot currently uses (e.g., GuildMessageReactions, DirectMessages etc.)
     ],
+    partials: ['MESSAGE', 'CHANNEL', 'REACTION', 'GUILD_MEMBER'], // <<< Add GUILD_MEMBER partial for consistency
 });
 
 client.commands = new Collection();
