@@ -1,65 +1,56 @@
 // D:\NoSleepV2\commands\moderation\clear.js
-const { PermissionsBitField, EmbedBuilder } = require('discord.js'); // Import EmbedBuilder
+const { PermissionsBitField, EmbedBuilder } = require('discord.js');
 const { sendModLogWebhook } = require('../../utils/webhookLogger');
 
 module.exports = {
     data: {
         name: 'clear',
-        description: 'Deletes a specified number of messages (up to 99).',
+        description: 'Deletes a specified number of messages from the channel.',
         cooldown: 5,
     },
-    async execute(message, args, client, guildSettings) {
+    async execute(message, args, client, currentGuildSettings) { // No pool needed for clear operation
         if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-            return message.reply({ content: '🚫 You do not have permission to manage messages.', ephemeral: true });
+            return message.reply({ content: '🚫 You do not have permission to clear messages.', ephemeral: true });
         }
 
         const amount = parseInt(args[0]);
 
-        if (isNaN(amount) || amount <= 0 || amount > 99) {
-            return message.reply({ content: '❌ Please provide a number between 1 and 99 messages to clear.', ephemeral: true });
+        if (isNaN(amount) || amount <= 0 || amount > 100) {
+            return message.reply({ content: '❌ You need to specify a number between 1 and 100 to clear.', ephemeral: true });
         }
 
         try {
-            const fetched = await message.channel.messages.fetch({ limit: amount + 1 });
-            const messagesToDelete = fetched.filter(msg => !msg.pinned);
+            const fetched = await message.channel.messages.fetch({ limit: amount });
+            const deletedMessages = await message.channel.bulkDelete(fetched, true); // true to filter out non-deletable messages (older than 14 days)
 
-            const deletedMessages = await message.channel.bulkDelete(messagesToDelete, true);
+            const clearEmbed = new EmbedBuilder()
+                .setColor(0x3498db) // Blue for moderation utility
+                .setTitle('🗑️ Messages Cleared')
+                .setDescription(`Successfully deleted \`${deletedMessages.size}\` messages.`)
+                .addFields(
+                    { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
+                    { name: 'Cleared By', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true }
+                )
+                .setTimestamp()
+                .setFooter({ text: `Command executed by ${message.author.tag}`, iconURL: message.author.displayAvatarURL({ dynamic: true }) });
 
-            // Confirmation message as an embed
-            const confirmationEmbed = new EmbedBuilder()
-                .setColor(0x2ecc71) // Green for success
-                .setDescription(`✅ Successfully deleted \`${deletedMessages.size}\` message(s) in <#${message.channel.id}>.`);
-            const confirmation = await message.channel.send({ embeds: [confirmationEmbed] });
-
-            // Delete confirmation message after 5 seconds
-            setTimeout(() => confirmation.delete().catch(console.error), 5000);
-
-            if (deletedMessages.size < amount) {
-                const notDeletedCount = amount - deletedMessages.size;
-                const warningEmbed = new EmbedBuilder()
-                    .setColor(0xf1c40f) // Yellow for warning
-                    .setDescription(`⚠️ **Warning:** Could not delete \`${notDeletedCount}\` message(s) as they are likely older than 14 days. Discord's API only allows bulk deletion of messages up to 14 days old.`);
-                const warning = await message.channel.send({ embeds: [warningEmbed] });
-                setTimeout(() => warning.delete().catch(console.error), 10000);
-            }
-
+            // Send webhook log
             sendModLogWebhook({
                 guildId: message.guild.id,
-                guildSettings: guildSettings,
+                guildSettings: currentGuildSettings,
                 action: 'Clear Messages',
                 executor: message.author,
                 channel: message.channel,
                 amount: deletedMessages.size,
-                color: 0x3498db // Blue color for clear
+                color: 0x3498db
             });
 
+            const reply = await message.channel.send({ embeds: [clearEmbed] });
+            setTimeout(() => reply.delete().catch(console.error), 5000); // Delete the confirmation message after 5 seconds
+
         } catch (error) {
-            console.error(error);
-            if (error.code === 50034) {
-                await message.reply({ content: '⛔ I can only bulk delete messages that are less than 14 days old. Please try a smaller amount or delete older messages manually.', ephemeral: true });
-            } else {
-                await message.reply({ content: '❌ There was an error trying to clear messages. Make sure I have "Manage Messages" permission.', ephemeral: true });
-            }
+            console.error('Error clearing messages:', error);
+            await message.reply({ content: '❌ An error occurred while trying to clear messages. Messages older than 14 days cannot be deleted.', ephemeral: true });
         }
     },
 };

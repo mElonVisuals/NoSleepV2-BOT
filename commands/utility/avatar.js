@@ -15,7 +15,7 @@ module.exports = {
         }
 
         const avatarEmbed = new EmbedBuilder()
-            .setColor(0x1abc9c) // Teal color
+            .setColor(0x5865f2) // Discord Blurple for utility
             .setTitle(`🖼️ ${user.username}'s Avatar`)
             .setImage(user.displayAvatarURL({ dynamic: true, size: 4096 })) // Get largest size
             .setDescription(`[Download Avatar](${user.displayAvatarURL({ dynamic: true, size: 4096 })})`)

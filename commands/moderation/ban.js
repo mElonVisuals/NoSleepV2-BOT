@@ -6,9 +6,9 @@ module.exports = {
     data: {
         name: 'ban',
         description: 'Bans a user from the server.',
-        cooldown: 10,
+        cooldown: 5,
     },
-    async execute(message, args, client, guildSettings) {
+    async execute(message, args, client, currentGuildSettings) { // No pool needed for ban operation directly
         if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
             return message.reply({ content: '🚫 You do not have permission to ban members.', ephemeral: true });
         }
@@ -23,8 +23,12 @@ module.exports = {
             return message.reply({ content: '😅 You cannot ban yourself!', ephemeral: true });
         }
 
-        if (!member.bannable) { // Use bannable property for clarity
-            return message.reply({ content: '⛔ I cannot ban this member. Their role might be higher than mine, or they are an administrator.', ephemeral: true });
+        if (member.id === client.user.id) {
+            return message.reply({ content: '🤦 I cannot ban myself.', ephemeral: true });
+        }
+
+        if (!member.bannable) {
+            return message.reply({ content: '⚠️ I cannot ban this user. They might have a higher role or insufficient permissions.', ephemeral: true });
         }
 
         if (member.roles.highest.position >= message.member.roles.highest.position && message.author.id !== message.guild.ownerId) {
@@ -34,35 +38,37 @@ module.exports = {
         const reason = args.slice(1).join(' ') || 'No reason provided';
 
         try {
-            await member.ban({ reason });
+            await member.ban({ reason: reason });
 
+            // Send webhook log
             sendModLogWebhook({
                 guildId: message.guild.id,
-                guildSettings: guildSettings,
+                guildSettings: currentGuildSettings,
                 action: 'Ban',
                 executor: message.author,
                 target: member.user,
                 reason: reason,
-                color: 0xe74c3c // Red color for bans (danger)
+                color: 0xed4245 // Red for ban
             });
 
             const banEmbed = new EmbedBuilder()
-                .setColor(0xe74c3c) // Red color for bans
-                .setTitle('🔨 Member Banned')
+                .setColor(0xed4245) // Red for ban
+                .setTitle('🔨 User Banned')
                 .setDescription(`**${member.user.tag}** has been banned from the server.`)
                 .addFields(
-                    { name: '👤 Banned User', value: `${member.user.tag} (${member.id})`, inline: false }, // Use inline: false for better readability here
-                    { name: '👮 Banned By', value: `${message.author.tag} (${message.author.id})`, inline: false },
+                    { name: '👤 Banned User', value: `${member.user.tag} (\`${member.id}\`)`, inline: false },
+                    { name: '👮 Banned By', value: `${message.author.tag} (\`${message.author.id}\`)`, inline: false },
                     { name: '💬 Reason', value: reason, inline: false }
                 )
                 .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .setTimestamp()
-                .setFooter({ text: `Ban ID: ${member.id}`, iconURL: client.user.displayAvatarURL() }); // Bot's avatar in footer
+                .setFooter({ text: `Ban executed by ${message.author.tag}`, iconURL: message.author.displayAvatarURL({ dynamic: true }) });
 
             await message.channel.send({ embeds: [banEmbed] });
+
         } catch (error) {
-            console.error(error);
-            await message.reply({ content: 'An unexpected error occurred while trying to ban this member. Please check my permissions.', ephemeral: true });
+            console.error('Error banning member:', error);
+            await message.reply({ content: '❌ An unexpected error occurred while trying to ban this member. Please check my permissions.', ephemeral: true });
         }
     },
 };

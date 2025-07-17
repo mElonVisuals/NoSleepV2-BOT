@@ -1,22 +1,21 @@
 // D:\NoSleepV2\commands\general\ping.js
-const { EmbedBuilder } = require('discord.js'); // Import EmbedBuilder
+const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: {
         name: 'ping',
-        description: 'Replies with the bot\'s latency.',
+        description: 'Checks the bot\'s latency to the Discord API.',
         cooldown: 5,
     },
     async execute(message, args, client) {
-        const sent = await message.reply('Pinging...'); // Send initial message to measure latency
-
+        const sent = await message.reply('🏓 Pinging...');
         const latency = sent.createdTimestamp - message.createdTimestamp;
-        const apiLatency = client.ws.ping; // WebSocket heartbeat ping
+        const apiLatency = client.ws.ping;
 
         const pingEmbed = new EmbedBuilder()
-            .setColor(0x2ecc71) // Green for success/good status
+            .setColor(0x5865f2) // Discord Blurple for general info
             .setTitle('🏓 Pong!')
-            .setDescription('Here are my current latencies:')
+            .setDescription('Here are the latency details:')
             .addFields(
                 { name: 'Bot Latency', value: `\`${latency}ms\``, inline: true },
                 { name: 'API Latency', value: `\`${apiLatency}ms\``, inline: true }
@@ -24,7 +23,6 @@ module.exports = {
             .setTimestamp()
             .setFooter({ text: `Requested by ${message.author.tag}`, iconURL: message.author.displayAvatarURL({ dynamic: true }) });
 
-        // Edit the original message with the embed
-        await sent.edit({ content: '\u200b', embeds: [pingEmbed] }); // \u200b is a zero-width space to clear "Pinging..."
+        await sent.edit({ content: ' ', embeds: [pingEmbed] }); // Edit initial message to include embed
     },
 };

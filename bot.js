@@ -1,42 +1,46 @@
 // D:\NoSleepV2\bot.js
 require('dotenv').config();
-const { Client, Collection, GatewayIntentBits, ActivityType } = require('discord.js'); // Import ActivityType
+const { Client, Collection, GatewayIntentBits, ActivityType } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 
-// Initialize PostgreSQL Pool (keep as is)
+// Initialize PostgreSQL Pool
 const pool = new Pool({
     host: process.env.PG_HOST,
     port: process.env.PG_PORT,
     user: process.env.PG_USER,
     password: process.env.PG_PASSWORD,
     database: process.env.PG_DATABASE,
-    ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false
+    ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false // For Coolify, this is likely 'true'
 });
 
+// Test PostgreSQL connection
 pool.connect()
     .then(client => {
         console.log('Connected to PostgreSQL database successfully!');
-        client.release();
+        client.release(); // Release the client back to the pool
     })
     .catch(err => {
         console.error('Error connecting to PostgreSQL database:', err.stack);
-        process.exit(1);
+        console.error('Please ensure your PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE, and PG_SSL environment variables are correct.');
+        process.exit(1); // Exit if cannot connect to DB
     });
 
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.Guilds,           // Required for guild-related events (e.g., fetching members, channels)
+        GatewayIntentBits.GuildMessages,    // Required for message creation events
+        GatewayIntentBits.MessageContent,   // Required to read message content (for commands)
+        GatewayIntentBits.GuildMembers,     // Required to access guild members (for user info, moderation, etc.)
+        GatewayIntentBits.GuildPresences    // Required for member status (if you need it, though not strictly for rich presence itself)
     ],
 });
 
 client.commands = new Collection();
 client.cooldowns = new Collection();
 
+// Load commands dynamically
 const foldersPath = path.join(__dirname, 'commands');
 const commandFolders = fs.readdirSync(foldersPath);
 
@@ -49,7 +53,7 @@ for (const folder of commandFolders) {
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, { ...command, category: folder });
         } else {
-            console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+            console.warn(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
         }
     }
 }
@@ -64,7 +68,7 @@ const activities = [
     { name: 'Type !help for guidance 📚', type: ActivityType.Playing },
     { name: 'for new updates! ✨', type: ActivityType.Listening },
     { name: 'the whispers of the server 🤫', type: ActivityType.Listening },
-    { name: 'the server rules 📜', type: ActivityType.Competing } // Example of Competing
+    { name: 'the server rules 📜', type: ActivityType.Competing }
 ];
 
 let activityIndex = 0; // To keep track of the current activity
@@ -72,15 +76,19 @@ let activityIndex = 0; // To keep track of the current activity
 function updatePresence() {
     const activity = activities[activityIndex];
 
-    // Handle dynamic values if needed, e.g., guild count
-    // This part is crucial if you have dynamic text in your activities array
+    // Handle dynamic values, specifically for guild count
     let currentActivityName = activity.name;
     if (currentActivityName.includes('${client.guilds.cache.size}')) {
-        currentActivityName = `over ${client.guilds.cache.size} servers 🌐`;
+        // Ensure client.guilds.cache is populated before trying to get size
+        if (client.isReady()) {
+            currentActivityName = `over ${client.guilds.cache.size} servers 🌐`;
+        } else {
+            currentActivityName = `starting up...`; // Fallback if client isn't ready yet
+        }
     }
 
     client.user.setActivity(currentActivityName, { type: activity.type });
-    console.log(`Set presence to: ${ActivityType[activity.type]} ${currentActivityName}`); // Log for debugging
+    console.log(`Set presence to: ${ActivityType[activity.type]} ${currentActivityName}`);
 
     activityIndex = (activityIndex + 1) % activities.length; // Cycle to the next activity
 }
@@ -91,6 +99,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
 
     try {
+        // Create guild_settings table if it doesn't exist
         await pool.query(`
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id VARCHAR(20) PRIMARY KEY,
@@ -100,6 +109,7 @@ client.once('ready', async () => {
             );
         `);
 
+        // Create warnings table if it doesn't exist
         await pool.query(`
             CREATE TABLE IF NOT EXISTS warnings (
                 id SERIAL PRIMARY KEY,
@@ -110,67 +120,94 @@ client.once('ready', async () => {
                 timestamp BIGINT NOT NULL
             );
         `);
-        console.log('PostgreSQL tables checked/created.');
+        console.log('PostgreSQL tables checked/created: guild_settings, warnings.');
 
+        // Migrate settings from old settings.json if it exists
         const settingsPath = './data/settings.json';
         if (fs.existsSync(settingsPath)) {
-            const oldGuildSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-            for (const guildId in oldGuildSettings) {
-                const settings = oldGuildSettings[guildId];
-                const existing = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
-                if (existing.rows.length === 0) {
-                    await pool.query(`
-                        INSERT INTO guild_settings (guild_id, prefix, mod_log_channel_id, mod_log_webhook_url)
-                        VALUES ($1, $2, $3, $4)
-                    `, [
-                        guildId,
-                        settings.prefix || '!',
-                        settings.modLogChannelId || '1234899698930811032',
-                        settings.modLogWebhookUrl || 'https://discord.com/api/webhooks/1395185514486960148/xN7V8paYHVHuRL8BUZpTcMCpLzDQ4FikiVNtQ-0ZYQfwuED4y7dEfW2deh8ZC26LsOG3'
-                    ]);
+            try {
+                const oldGuildSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+                for (const guildId in oldGuildSettings) {
+                    const settings = oldGuildSettings[guildId];
+                    // Check if guild already exists in DB to prevent duplicates
+                    const existing = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
+                    if (existing.rows.length === 0) {
+                        await pool.query(`
+                            INSERT INTO guild_settings (guild_id, prefix, mod_log_channel_id, mod_log_webhook_url)
+                            VALUES ($1, $2, $3, $4)
+                        `, [
+                            guildId,
+                            settings.prefix || '!',
+                            settings.modLogChannelId || null,
+                            settings.modLogWebhookUrl || null
+                        ]);
+                        console.log(`Migrated settings for guild ${guildId} from settings.json.`);
+                    }
                 }
+                // Rename old settings.json after successful migration to prevent re-migration
+                fs.renameSync(settingsPath, './data/settings_OLD.json');
+                console.log('Migrated existing settings from settings.json to PostgreSQL. Old file renamed to settings_OLD.json.');
+            } catch (jsonErr) {
+                console.error('Error migrating settings.json:', jsonErr.stack);
             }
-            console.log('Migrated existing settings from settings.json to PostgreSQL (if any).');
-            // fs.renameSync(settingsPath, './data/settings_OLD.json'); // Uncomment to rename old settings.json
         }
 
     } catch (err) {
         console.error('Error initializing database tables or migrating data:', err.stack);
-        process.exit(1);
+        process.exit(1); // Exit if database setup fails
     }
 
-    // --- Start the presence update interval ---
+    // Start the presence update interval
     updatePresence(); // Set initial presence immediately
     setInterval(updatePresence, 10000); // Change every 10 seconds (10000 ms)
 });
 
 client.on('messageCreate', async message => {
+    // Ignore bot messages and messages outside of a guild
     if (message.author.bot || !message.guild) return;
 
     const guildId = message.guild.id;
-    let result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
-    let currentGuildSettings = result.rows[0];
+    let currentGuildSettings;
 
-    if (!currentGuildSettings) {
-        await pool.query(`
-            INSERT INTO guild_settings (guild_id)
-            VALUES ($1)
-        `, [guildId]);
-        result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
+    try {
+        // Fetch guild settings from PostgreSQL
+        let result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
         currentGuildSettings = result.rows[0];
+
+        // If no settings found for this guild, create default ones
+        if (!currentGuildSettings) {
+            await pool.query(`
+                INSERT INTO guild_settings (guild_id)
+                VALUES ($1)
+            `, [guildId]);
+            // Re-fetch to get the newly created default settings
+            result = await pool.query('SELECT * FROM guild_settings WHERE guild_id = $1', [guildId]);
+            currentGuildSettings = result.rows[0];
+            console.log(`Created default settings for new guild: ${message.guild.name} (${guildId})`);
+        }
+    } catch (dbError) {
+        console.error(`Error fetching/creating guild settings for ${guildId}:`, dbError.stack);
+        // Optionally, reply to the channel that an error occurred
+        if (message.channel.type === 0) { // If it's a guild text channel
+            message.reply('An error occurred while fetching server settings. Please try again later.').catch(err => console.error('Failed to reply with DB error:', err));
+        }
+        return; // Stop processing this message if DB error
     }
 
-    const guildPrefix = currentGuildSettings.prefix || '!';
+    const guildPrefix = currentGuildSettings.prefix || '!'; // Use fetched prefix, default to '!'
 
+    // Ignore messages that don't start with the guild's prefix
     if (!message.content.startsWith(guildPrefix)) return;
 
+    // Parse command and arguments
     const args = message.content.slice(guildPrefix.length).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
 
     const command = client.commands.get(commandName);
 
-    if (!command) return;
+    if (!command) return; // Ignore if command does not exist
 
+    // Cooldowns logic
     const { cooldowns } = client;
 
     if (!cooldowns.has(command.data.name)) {
@@ -187,26 +224,39 @@ client.on('messageCreate', async message => {
 
         if (now < expirationTime) {
             const timeLeft = (expirationTime - now) / 1000;
-            return message.reply(`Please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.data.name}\` command.`).then(msg => {
-                setTimeout(() => msg.delete().catch(console.error), 5000);
-            });
+            // Ephemeral reply for cooldowns
+            return message.reply({
+                content: `Please wait \`${timeLeft.toFixed(1)}\` more second(s) before reusing the \`${command.data.name}\` command.`,
+                ephemeral: true
+            }).then(msg => {
+                // Optionally delete the bot's reply if it's not ephemeral
+                // setTimeout(() => msg.delete().catch(console.error), 5000);
+            }).catch(err => console.error('Failed to send cooldown reply:', err));
         }
     }
 
     timestamps.set(message.author.id, now);
     setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
 
+    // Execute the command
     try {
+        // Pass currentGuildSettings and the pool to the command's execute function
         await command.execute(message, args, client, currentGuildSettings, pool);
     } catch (error) {
         console.error(`Error executing command ${commandName}:`, error);
-        if (message.channel.type === 0) {
-            await message.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+        // Reply to the user about the error
+        if (message.channel.type === 0) { // Check if it's a guild text channel
+            await message.reply({ content: 'There was an error while executing this command!', ephemeral: true }).catch(err => console.error('Failed to send error reply:', err));
         } else {
-            console.warn(`Could not reply to error in DM for command ${commandName}.`);
+            console.warn(`Could not send error reply to DM for command ${commandName}.`);
         }
     }
 });
 
+// Log in to Discord
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
+if (!TOKEN) {
+    console.error('DISCORD_BOT_TOKEN environment variable is not set. Please set it in your .env file or Coolify environment variables.');
+    process.exit(1);
+}
 client.login(TOKEN);
