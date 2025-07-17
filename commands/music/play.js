@@ -1,15 +1,15 @@
 // D:\NoSleepV2\commands\music\play.js
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
+const play = require('play-dl'); // Import play-dl
 const { EmbedBuilder } = require('discord.js');
 
-// Simple queue for now (in-memory, won't persist across restarts)
-const queue = new Map(); // guildId -> { voiceChannel, textChannel, connection, player, songs }
+// Your existing queue map structure
+const queue = new Map();
 
 module.exports = {
     data: {
         name: 'play',
-        description: 'Plays music from YouTube in a voice channel.',
+        description: 'Plays music from YouTube (and other sources) in a voice channel.',
         cooldown: 5,
     },
     async execute(message, args, client, currentGuildSettings, pool) {
@@ -23,140 +23,138 @@ module.exports = {
             return message.reply({ content: 'I need the permissions to `Connect` and `Speak` in your voice channel!', ephemeral: true });
         }
 
-        const songInfo = args.join(' ');
-        if (!songInfo) {
-            return message.reply({ content: 'Please provide a song title or YouTube URL!', ephemeral: true });
+        const songUrl = args[0];
+        if (!songUrl) {
+            return message.reply({ content: 'Please provide a song link or search query!', ephemeral: true });
         }
 
-        let song;
+        let songInfo;
         try {
-            // Basic URL validation
-            if (ytdl.validateURL(songInfo)) {
-                const info = await ytdl.getInfo(songInfo);
-                song = {
-                    title: info.videoDetails.title,
-                    url: info.videoDetails.video_url,
-                    thumbnail: info.videoDetails.thumbnails[0]?.url,
-                    duration: info.videoDetails.lengthSeconds,
-                    requester: message.author.tag
-                };
-            } else {
-                // For simplicity, we'll just try to search for the first result using a dummy URL
-                // In a real bot, you'd integrate with a search API (e.g., YouTube Data API)
-                return message.reply({ content: 'Currently, I only support direct YouTube URLs for playing. Searching by title is not yet implemented.', ephemeral: true });
-                // Placeholder if you want to implement search later:
-                // const searchResult = await ytsr(songInfo, { limit: 1 });
-                // if (!searchResult.items.length) {
-                //     return message.reply({ content: 'Could not find any results for that query.', ephemeral: true });
-                // }
-                // const firstResult = searchResult.items[0];
-                // song = {
-                //     title: firstResult.title,
-                //     url: firstResult.url,
-                //     thumbnail: firstResult.thumbnail,
-                //     duration: firstResult.duration,
-                //     requester: message.author.tag
-                // };
-            }
-        } catch (error) {
-            console.error('Error fetching song info:', error);
-            return message.reply({ content: 'Could not find that song or an error occurred.', ephemeral: true });
-        }
-
-        const serverQueue = queue.get(message.guild.id);
-
-        if (!serverQueue) {
-            const connection = joinVoiceChannel({
-                channelId: voiceChannel.id,
-                guildId: voiceChannel.guild.id,
-                adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            // play-dl can handle direct YouTube links or even search queries
+            // For simplicity, let's assume direct YouTube link for now
+            // You can add search functionality later if desired
+            const result = await play.yt_info(songUrl, {
+                // You can add options here, e.g., 'quality': 'highestaudio'
             });
 
-            const player = createAudioPlayer();
+            if (!result || !result.video_details) {
+                return message.reply('Could not find video information for the provided link.');
+            }
 
+            songInfo = {
+                title: result.video_details.title,
+                url: result.video_details.url,
+                duration: result.video_details.durationInSec,
+                thumbnail: result.video_details.thumbnails[0].url // Get the first thumbnail
+            };
+        } catch (error) {
+            console.error('Error fetching song info with play-dl:', error);
+            return message.reply('Error fetching song information. Please ensure it\'s a valid YouTube link and try again.');
+        }
+
+        let serverQueue = queue.get(message.guild.id);
+
+        if (!serverQueue) {
             const queueContruct = {
-                voiceChannel: voiceChannel,
                 textChannel: message.channel,
-                connection: connection,
-                player: player,
+                voiceChannel: voiceChannel,
+                connection: null,
+                player: null, // Discord.js v13 audio player
                 songs: [],
                 volume: 0.5,
                 playing: true,
             };
 
             queue.set(message.guild.id, queueContruct);
-            queueContruct.songs.push(song);
+            queueContruct.songs.push(songInfo);
 
             try {
-                // Play the song
-                play(message.guild, queueContruct.songs[0]);
-                player.on(AudioPlayerStatus.Idle, () => {
-                    queueContruct.songs.shift(); // Remove current song
+                const connection = joinVoiceChannel({
+                    channelId: voiceChannel.id,
+                    guildId: voiceChannel.guild.id,
+                    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                });
+                queueContruct.connection = connection;
+
+                queueContruct.player = createAudioPlayer();
+                connection.subscribe(queueContruct.player); // Subscribe the connection to the player
+
+                // When the player enters the Idle state, play the next song
+                queueContruct.player.on(AudioPlayerStatus.Idle, () => {
+                    queueContruct.songs.shift(); // Remove the finished song
+                    this.playSong(message.guild, queueContruct.songs[0]);
+                });
+
+                // Handle player errors
+                queueContruct.player.on('error', error => {
+                    console.error(`Error in audio player for guild ${message.guild.id}:`, error);
+                    queueContruct.textChannel.send(`An error occurred during playback: \`${error.message}\`. Skipping song.`);
+                    queueContruct.songs.shift(); // Skip the problematic song
                     if (queueContruct.songs.length > 0) {
-                        play(message.guild, queueContruct.songs[0]); // Play next song
+                        this.playSong(message.guild, queueContruct.songs[0]);
                     } else {
+                        queueContruct.textChannel.send('Queue finished!');
                         queueContruct.connection.destroy();
                         queue.delete(message.guild.id);
-                        queueContruct.textChannel.send('Queue finished, leaving voice channel.');
                     }
                 });
 
-                player.on('error', error => {
-                    console.error('Audio Player Error:', error);
-                    queueContruct.textChannel.send(`An error occurred while playing: ${error.message}`);
-                    queueContruct.connection.destroy();
-                    queue.delete(message.guild.id);
-                });
+                this.playSong(message.guild, queueContruct.songs[0]);
 
             } catch (err) {
                 console.error(err);
                 queue.delete(message.guild.id);
-                connection.destroy();
                 return message.channel.send(err);
             }
         } else {
-            serverQueue.songs.push(song);
-            const embed = new EmbedBuilder()
-                .setColor(0x00FF00) // Green
+            serverQueue.songs.push(songInfo);
+            const addedEmbed = new EmbedBuilder()
+                .setColor(0xFEE75C) // Yellow
                 .setTitle('🎶 Song Added to Queue')
-                .setDescription(`**[${song.title}](${song.url})** has been added to the queue!`)
-                .setThumbnail(song.thumbnail || null)
-                .setTimestamp()
-                .setFooter({ text: `Requested by ${song.requester}` });
-            return message.channel.send({ embeds: [embed] });
+                .setDescription(`**[${songInfo.title}](${songInfo.url})** has been added to the queue!`)
+                .addFields(
+                    { name: 'Position in queue', value: `${serverQueue.songs.length - 1}`, inline: true },
+                    { name: 'Duration', value: `${new Date(songInfo.duration * 1000).toISOString().slice(11, 19)}`, inline: true }
+                )
+                .setThumbnail(songInfo.thumbnail)
+                .setTimestamp();
+            return message.channel.send({ embeds: [addedEmbed] });
+        }
+    },
+
+    // This is a helper method, define it outside execute but within module.exports
+    async playSong(guild, song) {
+        const serverQueue = queue.get(guild.id);
+        if (!song) {
+            serverQueue.textChannel.send('Queue finished!');
+            serverQueue.connection.destroy();
+            queue.delete(guild.id);
+            return;
         }
 
-        async function play(guild, song) {
-            const serverQueue = queue.get(guild.id);
-            if (!song) {
-                serverQueue.connection.destroy();
-                queue.delete(guild.id);
-                return;
-            }
+        try {
+            // Get stream using play-dl
+            const stream = await play.stream(song.url);
+            const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
-            const stream = ytdl(song.url, {
-                filter: 'audioonly',
-                quality: 'highestaudio',
-                highWaterMark: 1 << 25 // 32MB
-            });
-
-            const resource = createAudioResource(stream);
             serverQueue.player.play(resource);
-            serverQueue.connection.subscribe(serverQueue.player);
 
-            const embed = new EmbedBuilder()
-                .setColor(0x0099FF) // Blue
+            const playingEmbed = new EmbedBuilder()
+                .setColor(0x57F287) // Green
                 .setTitle('▶️ Now Playing')
                 .setDescription(`**[${song.title}](${song.url})**`)
                 .addFields(
-                    { name: 'Requested By', value: song.requester, inline: true },
-                    { name: 'Duration', value: song.duration ? `${Math.floor(song.duration / 60)}:${(song.duration % 60).toString().padStart(2, '0')}` : 'Live', inline: true }
+                    { name: 'Duration', value: `${new Date(song.duration * 1000).toISOString().slice(11, 19)}`, inline: true }
                 )
-                .setThumbnail(song.thumbnail || null)
-                .setTimestamp()
-                .setFooter({ text: `Enjoy the music!` });
+                .setThumbnail(song.thumbnail)
+                .setTimestamp();
 
-            serverQueue.textChannel.send({ embeds: [embed] });
+            serverQueue.textChannel.send({ embeds: [playingEmbed] });
+        } catch (error) {
+            console.error(`Error playing song ${song.title}:`, error);
+            serverQueue.textChannel.send(`Failed to play **${song.title}**: \`${error.message}\`. Skipping.`);
+            serverQueue.songs.shift(); // Skip this problematic song
+            this.playSong(guild, serverQueue.songs[0]); // Try playing the next one
         }
     },
 };
